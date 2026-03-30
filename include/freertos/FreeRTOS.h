@@ -1223,6 +1223,12 @@ typedef struct xSTATIC_TCB
     #if ( configUSE_POSIX_ERRNO == 1 )
         int iDummy22;
     #endif
+
+    #if ( configUSE_PORT_OPTIMISED_SCHEDULER == 1 )
+        TickType_t ulReadyTimeCounter; /*< Stores the amount of time since the task get ready */
+    #endif
+
+    unsigned long irqflags;
 } StaticTask_t;
 
 /*

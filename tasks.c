@@ -27,6 +27,7 @@
  */
 
 /* Standard includes. */
+#include <errno.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -115,6 +116,8 @@
     #define configIDLE_TASK_NAME    "IDLE"
 #endif
 
+#if ( configUSE_PORT_OPTIMISED_SCHEDULER == 0 )
+
 #if ( configUSE_PORT_OPTIMISED_TASK_SELECTION == 0 )
 
 /* If configUSE_PORT_OPTIMISED_TASK_SELECTION is 0 then task selection is
@@ -194,6 +197,79 @@
 
 #endif /* configUSE_PORT_OPTIMISED_TASK_SELECTION */
 
+#else
+
+    //#define taskTRACE_STARVED_TASK(pxTCB, ReadyTime) printf("starved [%s] %ld %ld\n", (pxTCB)->pcTaskName, (pxTCB)->uxPriority, ReadyTime)
+    #define taskTRACE_STARVED_TASK(pxTCB, ReadyTime)
+
+    #define taskRECORD_READY_PRIORITY( uxPriority )    portRECORD_READY_PRIORITY( uxPriority, uxTopReadyPriority )
+
+    #define taskSELECT_HIGHEST_PRIORITY_TASK()                                                         \
+    {                                                                                                  \
+        UBaseType_t uxTopPriority;                                                                     \
+        bool uxFoundTopStarvedPriority = false;                                                        \
+        UBaseType_t uxPriority;                                                                        \
+        UBaseType_t __uxTopReadyPriority = uxTopReadyPriority;                                         \
+        TickType_t ulReadyTimeDiff, ulReadyTimeDiffMax = 0;                                            \
+        configLIST_VOLATILE TCB_t * pxNextTCB, * pxFirstTCB, * pxStarvedTCB;                           \
+                                                                                                       \
+        do                                                                                             \
+        {                                                                                              \
+            portGET_HIGHEST_PRIORITY( uxPriority, __uxTopReadyPriority );                              \
+            if (uxPriority == portPRIVILEGE_BIT)                                                       \
+            {                                                                                          \
+                break;                                                                                 \
+            }                                                                                          \
+                                                                                                       \
+            portRESET_READY_PRIORITY( uxPriority, __uxTopReadyPriority );                              \
+                                                                                                       \
+            if( listCURRENT_LIST_LENGTH( &( pxReadyTasksLists[ uxPriority] ) ) == ( UBaseType_t ) 0 )  \
+            {                                                                                          \
+                continue;                                                                              \
+            }                                                                                          \
+                                                                                                       \
+            listGET_OWNER_OF_NEXT_ENTRY( pxFirstTCB, &( pxReadyTasksLists[ uxPriority] ));             \
+                                                                                                       \
+            do                                                                                         \
+            {                                                                                          \
+                listGET_OWNER_OF_NEXT_ENTRY( pxNextTCB, &( pxReadyTasksLists[ uxPriority] ));          \
+                ulReadyTimeDiff = xTickCount - pxNextTCB->ulReadyTimeCounter;                          \
+                if (ulReadyTimeDiff >= ((20 / portTICK_PERIOD_MS) * (configMAX_PRIORITIES - uxPriority))) \
+                {                                                                                      \
+                    if (ulReadyTimeDiff > ulReadyTimeDiffMax)                                          \
+                    {                                                                                  \
+                        ulReadyTimeDiffMax = ulReadyTimeDiff;                                          \
+                        pxStarvedTCB = pxNextTCB;                                                      \
+                        uxFoundTopStarvedPriority = true;                                              \
+                    }                                                                                  \
+                }                                                                                      \
+            } while( pxNextTCB != pxFirstTCB );                                                        \
+                                                                                                       \
+        } while (!uxFoundTopStarvedPriority);                                                          \
+                                                                                                       \
+        if (!uxFoundTopStarvedPriority)                                                                \
+        {                                                                                              \
+            portGET_HIGHEST_PRIORITY( uxTopPriority, uxTopReadyPriority );                             \
+            configASSERT( listCURRENT_LIST_LENGTH( &( pxReadyTasksLists[ uxTopPriority ] ) ) > 0 );    \
+            listGET_OWNER_OF_NEXT_ENTRY( pxCurrentTCB, &( pxReadyTasksLists[ uxTopPriority ] ) );      \
+        }                                                                                              \
+        else                                                                                           \
+        {                                                                                              \
+            pxCurrentTCB = pxStarvedTCB;                                                               \
+            taskTRACE_STARVED_TASK(pxCurrentTCB, ulReadyTimeDiffMax);                                  \
+        }                                                                                              \
+    }
+
+    #define taskRESET_READY_PRIORITY( uxPriority )                                                     \
+    {                                                                                                  \
+        if( listCURRENT_LIST_LENGTH( &( pxReadyTasksLists[ ( uxPriority ) ] ) ) == ( UBaseType_t ) 0 ) \
+        {                                                                                              \
+            portRESET_READY_PRIORITY( ( uxPriority ), ( uxTopReadyPriority ) );                        \
+        }                                                                                              \
+    }
+
+#endif /* configUSE_PORT_OPTIMISED_SCHEDULER */ 
+
 /*-----------------------------------------------------------*/
 
 /* pxDelayedTaskList and pxOverflowDelayedTaskList are switched when the tick
@@ -218,11 +294,24 @@
  * Place the task represented by pxTCB into the appropriate ready list for
  * the task.  It is inserted at the end of the list.
  */
+#if ( configUSE_PORT_OPTIMISED_SCHEDULER == 0 )
+
 #define prvAddTaskToReadyList( pxTCB )                                                                 \
     traceMOVED_TASK_TO_READY_STATE( pxTCB );                                                           \
     taskRECORD_READY_PRIORITY( ( pxTCB )->uxPriority );                                                \
     listINSERT_END( &( pxReadyTasksLists[ ( pxTCB )->uxPriority ] ), &( ( pxTCB )->xStateListItem ) ); \
     tracePOST_MOVED_TASK_TO_READY_STATE( pxTCB )
+
+#else
+
+#define prvAddTaskToReadyList( pxTCB )                                                                 \
+    traceMOVED_TASK_TO_READY_STATE( pxTCB );                                                           \
+    taskRECORD_READY_PRIORITY( ( pxTCB )->uxPriority );                                                \
+    ( pxTCB )->ulReadyTimeCounter = xTickCount;                                                        \
+    listINSERT_END( &( pxReadyTasksLists[ ( pxTCB )->uxPriority ] ), &( ( pxTCB )->xStateListItem ) ); \
+    tracePOST_MOVED_TASK_TO_READY_STATE( pxTCB )
+
+#endif
 /*-----------------------------------------------------------*/
 
 /*
@@ -328,6 +417,12 @@ typedef struct tskTaskControlBlock       /* The old naming convention is used to
     #if ( configUSE_POSIX_ERRNO == 1 )
         int iTaskErrno;
     #endif
+
+    #if ( configUSE_PORT_OPTIMISED_SCHEDULER == 1 )
+        TickType_t ulReadyTimeCounter; /*< Stores the amount of time since the task get ready */
+    #endif
+
+    unsigned long irqflags;
 } tskTCB;
 
 /* The old tskTCB name is maintained above then typedefed to the new TCB_t name
@@ -376,7 +471,7 @@ PRIVILEGED_DATA static volatile BaseType_t xSchedulerRunning = pdFALSE;
 PRIVILEGED_DATA static volatile TickType_t xPendedTicks = ( TickType_t ) 0U;
 PRIVILEGED_DATA static volatile BaseType_t xYieldPending = pdFALSE;
 PRIVILEGED_DATA static volatile BaseType_t xNumOfOverflows = ( BaseType_t ) 0;
-PRIVILEGED_DATA static UBaseType_t uxTaskNumber = ( UBaseType_t ) 0U;
+PRIVILEGED_DATA static UBaseType_t uxTaskNumber = ( UBaseType_t ) 1U;
 PRIVILEGED_DATA static volatile TickType_t xNextTaskUnblockTime = ( TickType_t ) 0U; /* Initialised to portMAX_DELAY before the scheduler starts. */
 PRIVILEGED_DATA static TaskHandle_t xIdleTaskHandle = NULL;                          /*< Holds the handle of the idle task.  The idle task is created automatically when the scheduler is started. */
 
@@ -401,7 +496,11 @@ PRIVILEGED_DATA static volatile UBaseType_t uxSchedulerSuspended = ( UBaseType_t
  * code working with debuggers that need to remove the static qualifier. */
     PRIVILEGED_DATA static configRUN_TIME_COUNTER_TYPE ulTaskSwitchedInTime = 0UL;    /*< Holds the value of a timer/counter the last time a task was switched in. */
     PRIVILEGED_DATA static volatile configRUN_TIME_COUNTER_TYPE ulTotalRunTime = 0UL; /*< Holds the total amount of execution time as defined by the run time counter clock. */
-
+    PRIVILEGED_DATA static configRUN_TIME_COUNTER_TYPE ulTaskSwitchedInISRTime = 0UL; /*< Holds the value execution time of ISR the last time a task was switched in. */
+    PRIVILEGED_DATA volatile configRUN_TIME_COUNTER_TYPE ulTotalISRRunTime = 0UL;     /*< Holds the total amount of execution time of ISR. */
+#if ( configGENERATE_DETAIL_ISR_RUN_TIME_STATS == 1)
+    PRIVILEGED_DATA volatile UBaseType_t uxISRNumber = 1UL;                           /*< Holds the total number of registered ISR, starts from 1 which is reserved for Softirq that is done in ISR. */
+#endif
 #endif
 
 /*lint -restore */
@@ -481,6 +580,11 @@ static void prvAddCurrentTaskToDelayedList( TickType_t xTicksToWait,
                                                      List_t * pxList,
                                                      eTaskState eState ) PRIVILEGED_FUNCTION;
 
+#if ( configGENERATE_DETAIL_ISR_RUN_TIME_STATS == 1)
+    extern UBaseType_t portGetDetailISRRunTimeStats( TaskStatus_t * pxTaskStatusArray, UBaseType_t uxMaxISRNumber ) PRIVILEGED_FUNCTION;
+#endif
+    extern UBaseType_t portGetOtherRunTimeStats( TaskStatus_t * pxTaskStatusArray, UBaseType_t uxMaxISRNumber ) PRIVILEGED_FUNCTION;
+    extern UBaseType_t portGetOtherRunTimeStatsNum( void ) PRIVILEGED_FUNCTION;
 #endif
 
 /*
@@ -2527,6 +2631,14 @@ char * pcTaskGetName( TaskHandle_t xTaskToQuery ) /*lint !e971 Unqualified char 
     {
         UBaseType_t uxTask = 0, uxQueue = configMAX_PRIORITIES;
 
+#if ( configGENERATE_DETAIL_ISR_RUN_TIME_STATS == 1)
+        UBaseType_t uxTmpISRNumber;
+        uxTmpISRNumber = uxISRNumber;
+#endif
+
+        UBaseType_t uxTmpOtherNumber;
+        uxTmpOtherNumber = portGetOtherRunTimeStatsNum();
+
         vTaskSuspendAll();
         {
             /* Is there a space in the array for each task in the system? */
@@ -2560,6 +2672,31 @@ char * pcTaskGetName( TaskHandle_t xTaskToQuery ) /*lint !e971 Unqualified char 
                         uxTask += prvListTasksWithinSingleList( &( pxTaskStatusArray[ uxTask ] ), &xSuspendedTaskList, eSuspended );
                     }
                 #endif
+
+                if( (uxTask + 1) <= uxArraySize )
+                {
+                    pxTaskStatusArray[ uxTask ].pcTaskName = (const char *)"ISR";
+                    pxTaskStatusArray[ uxTask ].uxCurrentPriority = 0;
+                    pxTaskStatusArray[ uxTask ].pxStackBase = NULL;
+                    pxTaskStatusArray[ uxTask ].xTaskNumber = 1;
+                    pxTaskStatusArray[ uxTask ].uxBasePriority = 0;
+                    pxTaskStatusArray[ uxTask ].ulRunTimeCounter = ulTotalISRRunTime;
+                    pxTaskStatusArray[ uxTask ].eCurrentState = eBlocked;
+                    pxTaskStatusArray[ uxTask ].usStackHighWaterMark = 0;
+                    uxTask++;
+                }
+
+#if ( configGENERATE_DETAIL_ISR_RUN_TIME_STATS == 1)
+                if( (uxTask + uxTmpISRNumber) <= uxArraySize )
+                {
+                    uxTask += portGetDetailISRRunTimeStats( &( pxTaskStatusArray[ uxTask ] ), uxTmpISRNumber);
+                }
+#endif
+
+                if( (uxTask + uxTmpOtherNumber) <= uxArraySize )
+                {
+                    uxTask += portGetOtherRunTimeStats( &( pxTaskStatusArray[ uxTask ] ), uxTmpOtherNumber);
+                }
 
                 #if ( configGENERATE_RUN_TIME_STATS == 1 )
                     {
@@ -3040,6 +3177,7 @@ void vTaskSwitchContext( void )
                 if( ulTotalRunTime > ulTaskSwitchedInTime )
                 {
                     pxCurrentTCB->ulRunTimeCounter += ( ulTotalRunTime - ulTaskSwitchedInTime );
+                    pxCurrentTCB->ulRunTimeCounter -= ( ulTotalISRRunTime - ulTaskSwitchedInISRTime );
                 }
                 else
                 {
@@ -3047,6 +3185,7 @@ void vTaskSwitchContext( void )
                 }
 
                 ulTaskSwitchedInTime = ulTotalRunTime;
+                ulTaskSwitchedInISRTime = ulTotalISRRunTime;
             }
         #endif /* configGENERATE_RUN_TIME_STATS */
 
@@ -3057,6 +3196,7 @@ void vTaskSwitchContext( void )
         #if ( configUSE_POSIX_ERRNO == 1 )
             {
                 pxCurrentTCB->iTaskErrno = FreeRTOS_errno;
+                pxCurrentTCB->iTaskErrno = errno;
             }
         #endif
 
@@ -3069,6 +3209,7 @@ void vTaskSwitchContext( void )
         #if ( configUSE_POSIX_ERRNO == 1 )
             {
                 FreeRTOS_errno = pxCurrentTCB->iTaskErrno;
+                errno = pxCurrentTCB->iTaskErrno;
             }
         #endif
 
@@ -4338,12 +4479,23 @@ static void prvResetNextTaskUnblockTime( void )
 
 #if ( portCRITICAL_NESTING_IN_TCB == 1 )
 
+    bool vTaskIsInCritical( void )
+    {
+        if( xSchedulerRunning != pdFALSE )
+            return ( pxCurrentTCB->uxCriticalNesting > 0U );
+        else
+            return true;
+    }
+
     void vTaskEnterCritical( void )
     {
-        portDISABLE_INTERRUPTS();
-
         if( xSchedulerRunning != pdFALSE )
         {
+            if ( pxCurrentTCB->uxCriticalNesting == 0 )
+            {
+                pxCurrentTCB->irqflags = arch_local_irq_save();
+            }
+
             ( pxCurrentTCB->uxCriticalNesting )++;
 
             /* This is not the interrupt safe version of the enter critical
@@ -4378,7 +4530,7 @@ static void prvResetNextTaskUnblockTime( void )
 
                 if( pxCurrentTCB->uxCriticalNesting == 0U )
                 {
-                    portENABLE_INTERRUPTS();
+                    arch_local_irq_restore(pxCurrentTCB->irqflags);
                 }
                 else
                 {
@@ -4515,7 +4667,7 @@ static void prvResetNextTaskUnblockTime( void )
                 pcWriteBuffer = prvWriteNameToBuffer( pcWriteBuffer, pxTaskStatusArray[ x ].pcTaskName );
 
                 /* Write the rest of the string. */
-                sprintf( pcWriteBuffer, "\t%c\t%u\t%u\t%u\r\n", cStatus, ( unsigned int ) pxTaskStatusArray[ x ].uxCurrentPriority, ( unsigned int ) pxTaskStatusArray[ x ].usStackHighWaterMark, ( unsigned int ) pxTaskStatusArray[ x ].xTaskNumber ); /*lint !e586 sprintf() allowed as this is compiled with many compilers and this is a utility function only - not part of the core kernel implementation. */
+                sprintf( pcWriteBuffer, "\t%c\t%u\t%u\t%u\t%p\r\n", cStatus, ( unsigned int ) pxTaskStatusArray[ x ].uxCurrentPriority, ( unsigned int ) pxTaskStatusArray[ x ].usStackHighWaterMark, ( unsigned int ) pxTaskStatusArray[ x ].xTaskNumber, (void *)pxTaskStatusArray[ x ].xHandle ); /*lint !e586 sprintf() allowed as this is compiled with many compilers and this is a utility function only - not part of the core kernel implementation. */
                 pcWriteBuffer += strlen( pcWriteBuffer );                                                                                                                                                                                                /*lint !e9016 Pointer arithmetic ok on char pointers especially as in this case where it best denotes the intent of the code. */
             }
 
@@ -4576,12 +4728,18 @@ static void prvResetNextTaskUnblockTime( void )
 
         /* Take a snapshot of the number of tasks in case it changes while this
          * function is executing. */
-        uxArraySize = uxCurrentNumberOfTasks;
+        uxArraySize = uxCurrentNumberOfTasks + 1;
+
+#if ( configGENERATE_DETAIL_ISR_RUN_TIME_STATS == 1)
+        uxArraySize += uxISRNumber;
+#endif
+
+        uxArraySize += portGetOtherRunTimeStatsNum();
 
         /* Allocate an array index for each task.  NOTE!  If
          * configSUPPORT_DYNAMIC_ALLOCATION is set to 0 then pvPortMalloc() will
          * equate to NULL. */
-        pxTaskStatusArray = pvPortMalloc( uxCurrentNumberOfTasks * sizeof( TaskStatus_t ) ); /*lint !e9079 All values returned by pvPortMalloc() have at least the alignment required by the MCU's stack and this allocation allocates a struct that has the alignment requirements of a pointer. */
+        pxTaskStatusArray = pvPortMalloc( uxArraySize * sizeof( TaskStatus_t ) ); /*lint !e9079 All values returned by pvPortMalloc() have at least the alignment required by the MCU's stack and this allocation allocates a struct that has the alignment requirements of a pointer. */
 
         if( pxTaskStatusArray != NULL )
         {
@@ -4654,6 +4812,243 @@ static void prvResetNextTaskUnblockTime( void )
         {
             mtCOVERAGE_TEST_MARKER();
         }
+    }
+
+    struct tskTaskTickPerious {
+        uint8_t uTaskExist;
+        uint8_t ulRunTimeCounterChanged;
+        UBaseType_t xTaskNumber;
+        uint32_t ulRunTimeCounter;
+        uint32_t uTickTaskPerious;
+        const char *pcTaskName;
+    };
+    static uint32_t uTickSysPerious = 0x0;
+    static struct tskTaskTickPerious *pxTickTaskPerious = NULL;
+    static uint32_t uTickTaskPeriousNum = 0;
+
+    void vTaskGetRunTimePeriodStats( char *pcWriteBuffer )
+    {
+        TaskStatus_t *pxTaskStatusArray;
+        volatile UBaseType_t uxArraySize, x, y, z;
+        uint32_t ulTotalTime, ulStatsAsPercentage;
+        uint32_t uDiff;
+
+        #if( configUSE_TRACE_FACILITY != 1 )
+            {
+                #error configUSE_TRACE_FACILITY must also be set to 1 in FreeRTOSConfig.h to use vTaskGetRunTimeStats().
+            }
+        #endif
+
+        /*
+         * PLEASE NOTE:
+         *
+         * This function is provided for convenience only, and is used by many
+         * of the demo applications.  Do not consider it to be part of the
+         * scheduler.
+         *
+         * vTaskGetRunTimeStats() calls uxTaskGetSystemState(), then formats part
+         * of the uxTaskGetSystemState() output into a human readable table that
+         * displays the amount of time each task has spent in the Running state
+         * in both absolute and percentage terms.
+         *
+         * vTaskGetRunTimeStats() has a dependency on the sprintf() C library
+         * function that might bloat the code size, use a lot of stack, and
+         * provide different results on different platforms.  An alternative,
+         * tiny, third party, and limited functionality implementation of
+         * sprintf() is provided in many of the FreeRTOS/Demo sub-directories in
+         * a file called printf-stdarg.c (note printf-stdarg.c does not provide
+         * a full snprintf() implementation!).
+         *
+         * It is recommended that production systems call uxTaskGetSystemState()
+         * directly to get access to raw stats data, rather than indirectly
+         * through a call to vTaskGetRunTimeStats().
+         */
+
+        /* Make sure the write buffer does not contain a string. */
+        *pcWriteBuffer = 0x00;
+
+        /* Take a snapshot of the number of tasks in case it changes while this
+           function is executing. */
+        uxArraySize = uxCurrentNumberOfTasks + 1;
+
+#if ( configGENERATE_DETAIL_ISR_RUN_TIME_STATS == 1)
+        uxArraySize += uxISRNumber;
+#endif
+
+        uxArraySize += portGetOtherRunTimeStatsNum();
+
+        /* Allocate an array index for each task.  NOTE!  If
+           configSUPPORT_DYNAMIC_ALLOCATION is set to 0 then pvPortMalloc() will
+           equate to NULL. */
+        pxTaskStatusArray = pvPortMalloc( uxArraySize * sizeof( TaskStatus_t ) );
+
+        if( pxTaskStatusArray != NULL )
+        {
+            /* Generate the (binary) data. */
+            uxArraySize = uxTaskGetSystemState( pxTaskStatusArray, uxArraySize, &ulTotalTime );
+
+            if (uxArraySize > uTickTaskPeriousNum)
+            {
+                if (!pxTickTaskPerious)
+                {
+                    pxTickTaskPerious = pvPortMalloc((uxArraySize + 20) * sizeof(struct tskTaskTickPerious));
+                    memset(pxTickTaskPerious, 0, (uxArraySize + 20) * sizeof(struct tskTaskTickPerious));
+                }
+                else
+                {
+                    pxTickTaskPerious = realloc(pxTickTaskPerious, (uxArraySize + 20) * sizeof(struct tskTaskTickPerious));
+                    memset((void *)pxTickTaskPerious + uTickTaskPeriousNum * sizeof(struct tskTaskTickPerious), 0,
+                            (uxArraySize - uTickTaskPeriousNum) * sizeof(struct tskTaskTickPerious));
+                }
+
+                uTickTaskPeriousNum = uxArraySize + 20;
+            }
+
+            /* For percentage calculations. */
+            ulTotalTime = portGET_RUN_TIME_COUNTER_VALUE() - uTickSysPerious ;
+            ulTotalTime /= 100UL;
+
+            /* Avoid divide by zero errors. */
+            if( ulTotalTime > 0 )
+            {
+                if ( uxArraySize > 0 ) {
+                    for ( x = 0; x < uTickTaskPeriousNum; x++ )
+                    {
+                        if (!pxTickTaskPerious[x].uTaskExist)
+                            continue;
+                        for ( y = 0; y < uxArraySize; y++ )
+                        {
+                            if (pxTickTaskPerious[x].xTaskNumber == pxTaskStatusArray[y].xTaskNumber)
+                            {
+                                break;
+                            }
+                        }
+
+                        if ( y == uxArraySize )
+                            pxTickTaskPerious[x].uTaskExist = 0;
+                    }
+
+                    for ( x = 0; x < uxArraySize; x++ )
+                    {
+                        z = uTickTaskPeriousNum;
+                        for ( y = 0; y < uTickTaskPeriousNum; y++ )
+                        {
+                            if (!pxTickTaskPerious[y].uTaskExist) {
+                                z = y;
+                            }
+
+                            if (pxTickTaskPerious[y].xTaskNumber == pxTaskStatusArray[x].xTaskNumber)
+                            {
+                                if (pxTickTaskPerious[y].ulRunTimeCounter == pxTaskStatusArray[x].ulRunTimeCounter)
+                                    pxTickTaskPerious[y].ulRunTimeCounterChanged = 0;
+                                else
+                                {
+                                    pxTickTaskPerious[y].ulRunTimeCounterChanged = 1;
+                                    pxTickTaskPerious[y].uTickTaskPerious = pxTaskStatusArray[x].ulRunTimeCounter - pxTickTaskPerious[y].ulRunTimeCounter;
+                                    pxTickTaskPerious[y].ulRunTimeCounter = pxTaskStatusArray[x].ulRunTimeCounter;
+                                }
+                                break;
+                            }
+                        }
+
+                        if ( y == uTickTaskPeriousNum )
+                        {
+                            if (z != uTickTaskPeriousNum)
+                            {
+                                pxTickTaskPerious[z].xTaskNumber = pxTaskStatusArray[x].xTaskNumber;
+                                pxTickTaskPerious[z].pcTaskName = pxTaskStatusArray[x].pcTaskName;
+                                pxTickTaskPerious[z].ulRunTimeCounter = pxTaskStatusArray[x].ulRunTimeCounter;
+                                pxTickTaskPerious[z].uTickTaskPerious = 0;
+                                pxTickTaskPerious[z].ulRunTimeCounterChanged = 1;
+                                pxTickTaskPerious[z].uTaskExist = 1;
+                            }
+                        }
+                    }
+                }
+
+                /* Create a human readable table from the binary data. */
+                for( x = 0; x < uTickTaskPeriousNum; x++ )
+                {
+
+                    if (!pxTickTaskPerious[x].uTaskExist)
+                        continue;
+
+                    if (!pxTickTaskPerious[x].ulRunTimeCounterChanged)
+                        continue;
+
+                    uDiff = pxTickTaskPerious[x].uTickTaskPerious;
+
+                    /* What percentage of the total run time has the task used?
+                       This will always be rounded down to the nearest integer.
+                       ulTotalRunTimeDiv100 has already been divided by 100. */
+                    ulStatsAsPercentage = uDiff / ulTotalTime;
+
+                    /* Write the task name to the string, padding with
+                       spaces so it can be printed in tabular form more
+                       easily. */
+                    pcWriteBuffer = prvWriteNameToBuffer( pcWriteBuffer, pxTickTaskPerious[ x ].pcTaskName );
+
+                    if( ulStatsAsPercentage > 0UL )
+                    {
+                        #ifdef portLU_PRINTF_SPECIFIER_REQUIRED
+                        {
+                            sprintf( pcWriteBuffer, "\t%2u\t\t%10u\t\t%2u%%\r\n", \
+                                    pxTickTaskPerious[x].xTaskNumber,
+                                    uDiff, 
+                                    ulStatsAsPercentage );
+                        }
+                        #else
+                        {
+                            /* sizeof( int ) == sizeof( long ) so a smaller
+                               printf() library can be used. */
+                            sprintf( pcWriteBuffer, "\t%2u\t\t%10u\t\t%2u%%\r\n", \
+                                    ( unsigned int ) pxTickTaskPerious[x].xTaskNumber,
+                                    ( unsigned int ) uDiff,
+                                    ( unsigned int ) ulStatsAsPercentage );
+                        }
+                        #endif
+                    }
+                    else
+                    {
+                        /* If the percentage is zero here then the task has
+                           consumed less than 1% of the total run time. */
+                        #ifdef portLU_PRINTF_SPECIFIER_REQUIRED
+                        {
+                            sprintf( pcWriteBuffer, "\t%2u\t\t%10u\t\t<1%%\r\n", \
+                                    pxTickTaskPerious[x].xTaskNumber,
+                                    uDiff );
+                        }
+                        #else
+                        {
+                            /* sizeof( int ) == sizeof( long ) so a smaller
+                               printf() library can be used. */
+                            sprintf( pcWriteBuffer, "\t%2u\t\t%10u\t\t<1%%\r\n", \
+                                    ( unsigned int ) pxTickTaskPerious[x].xTaskNumber,
+                                    ( unsigned int ) uDiff );
+                        }
+                        #endif
+                    }
+
+                    pcWriteBuffer += strlen( pcWriteBuffer );
+                }
+            }
+            else
+            {
+                mtCOVERAGE_TEST_MARKER();
+            }
+
+            /* Free the array again.  NOTE!  If configSUPPORT_DYNAMIC_ALLOCATION
+               is 0 then vPortFree() will be #defined to nothing. */
+            vPortFree( pxTaskStatusArray );
+        }
+        else
+        {
+            mtCOVERAGE_TEST_MARKER();
+        }
+
+        sprintf( pcWriteBuffer, "\r\ninterval cost time : %10u\r\n", ( unsigned int ) ulTotalTime * 100);
+
+        uTickSysPerious = portGET_RUN_TIME_COUNTER_VALUE();
     }
 
 #endif /* ( ( configGENERATE_RUN_TIME_STATS == 1 ) && ( configUSE_STATS_FORMATTING_FUNCTIONS > 0 ) && ( configSUPPORT_STATIC_ALLOCATION == 1 ) ) */

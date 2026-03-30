@@ -50,7 +50,7 @@
  * included here.  In this case the path to the correct portmacro.h header file
  * must be set in the compiler's include path. */
 #ifndef portENTER_CRITICAL
-    #include "portmacro.h"
+    #include "portable/portmacro.h"
 #endif
 
 #if portBYTE_ALIGNMENT == 32
@@ -78,7 +78,7 @@
 #endif
 
 #ifndef portHAS_STACK_OVERFLOW_CHECKING
-    #define portHAS_STACK_OVERFLOW_CHECKING    0
+    #define portHAS_STACK_OVERFLOW_CHECKING    1
 #endif
 
 #ifndef portARCH_NAME

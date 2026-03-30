@@ -55,8 +55,8 @@
  */
 
 
-#ifndef LIST_H
-#define LIST_H
+#ifndef FREERTOS_LIST_H
+#define FREERTOS_LIST_H
 
 #ifndef INC_FREERTOS_H
     #error "FreeRTOS.h must be included before list.h"
@@ -496,4 +496,4 @@ UBaseType_t uxListRemove( ListItem_t * const pxItemToRemove ) PRIVILEGED_FUNCTIO
 #endif
 /* *INDENT-ON* */
 
-#endif /* ifndef LIST_H */
+#endif /* ifndef FREERTOS_LIST_H */

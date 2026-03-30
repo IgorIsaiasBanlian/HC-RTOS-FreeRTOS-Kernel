@@ -1883,6 +1883,7 @@ void vTaskList( char * pcWriteBuffer ) PRIVILEGED_FUNCTION;     /*lint !e971 Unq
  * \ingroup TaskUtils
  */
 void vTaskGetRunTimeStats( char * pcWriteBuffer ) PRIVILEGED_FUNCTION;     /*lint !e971 Unqualified char types are allowed for strings and single characters only. */
+void vTaskGetRunTimePeriodStats( char *pcWriteBuffer ) PRIVILEGED_FUNCTION;
 
 /**
  * task. h
@@ -3063,6 +3064,7 @@ TaskHandle_t pvTaskIncrementMutexHeldCount( void ) PRIVILEGED_FUNCTION;
  */
 void vTaskInternalSetTimeOutState( TimeOut_t * const pxTimeOut ) PRIVILEGED_FUNCTION;
 
+int vApplicationIdleHookRegister(void (*callback)(uint32_t), uint32_t param);
 
 /* *INDENT-OFF* */
 #ifdef __cplusplus
