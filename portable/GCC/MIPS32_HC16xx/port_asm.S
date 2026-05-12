@@ -23,6 +23,9 @@
 	.ent    _osGeneralExceptHdl
 
 _osGeneralExceptHdl:
+	la      gp, _gp
+	nop
+	
 	la      k0, pRaException
 	sw      ra, (k0)
 	la      k0, pSpException
