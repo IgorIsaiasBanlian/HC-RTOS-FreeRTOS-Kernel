@@ -8,6 +8,7 @@
 	.extern show_stack
 	.extern pRaException
 	.extern pSpException
+	.extern _gp
 
 	.set    noreorder
 	.set    noat
@@ -23,9 +24,6 @@
 	.ent    _osGeneralExceptHdl
 
 _osGeneralExceptHdl:
-	la      gp, _gp
-	nop
-	
 	la      k0, pRaException
 	sw      ra, (k0)
 	la      k0, pSpException
@@ -59,6 +57,7 @@ yield_int:
 	la      sp, xISRStackTop
 	lw      sp, (sp)
 
+	la      gp, _gp
 	jal     vPortInterruptHandoff
 	nop
 
@@ -71,6 +70,7 @@ not_yield_int:
 	la      sp, xISRStackTop
 	lw      sp, (sp)
 
+	la      gp, _gp
 	jal     vPortInterruptHandoff
 	nop
 
